@@ -100,6 +100,19 @@ const getCurrentUser = async (req, res) => {
 
 const getProfile = async (req, res) => {
   try {
+    if (req.user.role === "admin") {
+      return res.status(200).json({
+        success: true,
+        data: {
+          name: req.user.email ? req.user.email.split(".")[0] + " Admin" : "Admin",
+          email: req.user.email || "",
+          dob: "",
+          role: "admin",
+          uid: req.user.uid || req.user.id,
+        },
+      });
+    }
+
     const docRef = db.collection("users").doc(req.user.id);
     const docSnap = await docRef.get();
 

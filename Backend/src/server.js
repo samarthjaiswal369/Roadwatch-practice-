@@ -3,7 +3,7 @@ require("dotenv").config();
 const app = require("./app");
 const { db } = require("./config/firebase");
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5001;
 
 
 // Firebase Connection Check

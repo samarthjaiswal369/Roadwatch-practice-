@@ -1,270 +1,394 @@
-import React, { useState, useCallback, useRef } from 'react';
-import { GoogleMap, useJsApiLoader, Polyline, Marker } from '@react-google-maps/api';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { GoogleMap, useJsApiLoader } from '@react-google-maps/api';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { X, AlertTriangle, CheckCircle, Clock, MapPin, ChevronRight, Navigation2, Layers } from 'lucide-react';
-import { mumbaiRoads, conditionConfig, mumbaiCenter } from '../data/mumbaiRoads';
+import {
+  X,
+  AlertTriangle,
+  CheckCircle,
+  Clock,
+  MapPin,
+  ChevronRight,
+  Navigation2,
+  Layers,
+} from 'lucide-react';
+
+import roads from '../data/roads';
 import useAppStore from '../store/useAppStore';
 import { PageContainer } from '../components/layout/PageContainer';
-import { Card, SectionHeader, PageHeader } from '../components/ui';
-import { ErrorBoundary } from 'react-error-boundary';
+import { Card, SectionHeader } from '../components/ui';
+
+const MUMBAI_CENTER = { lat: 19.0760, lng: 72.8777 };
+
+const mapContainerStyle = {
+  width: '100%',
+  height: '100%',
+};
 
 const mapStyles = [
   { featureType: 'all', elementType: 'geometry', stylers: [{ color: '#f5f5f5' }] },
   { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#c9d8e8' }] },
-  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#ffffff' }] },
-  { featureType: 'administrative', elementType: 'geometry', stylers: [{ color: '#d6d6d6' }] },
 ];
 
-const mapContainerStyle = { width: '100%', height: '100%' };
-const options = { styles: mapStyles, disableDefaultUI: true, zoomControl: false, clickableIcons: false };
+const getSeverity = (complaints) => {
+  if (!complaints || complaints <= 4) {
+    return {
+      label: 'Good',
+      hex: '#22c55e',
+      bgColor: 'rgba(34,197,94,0.15)',
+    };
+  }
 
-const conditionIcons = {
-  good:     <CheckCircle size={14} className="text-success" />,
-  warning:  <Clock size={14} className="text-warning" />,
-  critical: <AlertTriangle size={14} className="text-danger" />,
+  if (complaints <= 8) {
+    return {
+      label: 'Warning',
+      hex: '#eab308',
+      bgColor: 'rgba(234,179,8,0.15)',
+    };
+  }
+
+  return {
+    label: 'Critical',
+    hex: '#ef4444',
+    bgColor: 'rgba(239,68,68,0.15)',
+  };
 };
 
-function Legend() {
-  return (
-    <div className="absolute top-4 right-4 z-10 rounded-xl p-4 shadow-md bg-white/90 backdrop-blur-md border border-border-subtle">
-      <SectionHeader title="Road Condition" className="mb-3" />
-      {Object.entries(conditionConfig).map(([key, cfg]) => (
-        <div key={key} className="flex items-center gap-3 mb-2 last:mb-0">
-          <div className="w-6 h-1.5 rounded-full" style={{ background: cfg.hex }} />
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">{cfg.label}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-
-
 function BottomSheet({ road, onClose, onRaiseComplaint }) {
-  const cfg = conditionConfig[road.condition];
+  if (!road) return null;
+
+  const cfg = getSeverity(road.complaints);
+
   return (
     <motion.div
       initial={{ y: '100%' }}
       animate={{ y: 0 }}
       exit={{ y: '100%' }}
       transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-      className="absolute bottom-0 left-0 right-0 z-20 rounded-t-3xl p-6 shadow-[0_-8px_30px_rgb(0,0,0,0.12)] bg-bg-surface/80 backdrop-blur-2xl border-t border-border-subtle max-h-[85vh] overflow-y-auto"
+      className="absolute bottom-0 left-0 right-0 z-20 rounded-t-3xl p-4 bg-bg-surface border-t border-border-subtle shadow-2xl"
     >
-      <div className="w-12 h-1.5 rounded-full bg-slate-300/50 mx-auto mb-6" />
-
-      <div className="flex items-start justify-between mb-5">
-        <div className="flex-1 pr-6">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 shadow-sm"
-              style={{ background: cfg.bgColor, color: cfg.textColor, border: `1px solid ${cfg.hex}30` }}>
-              {conditionIcons[road.condition]}
-              {cfg.label}
-            </div>
-            <span className="text-[11px] font-bold text-text-muted uppercase tracking-wider">{road.authority}</span>
-          </div>
-          <h2 className="text-2xl font-extrabold text-text-main tracking-tight">{road.name}</h2>
-          <div className="flex items-center gap-2 mt-2 text-text-muted text-sm font-semibold">
-            <MapPin size={14} className="text-primary" />
-            <span>{road.from}</span>
-            <ChevronRight size={14} className="text-slate-300" />
-            <span>{road.to}</span>
-          </div>
+      <div className="flex items-start justify-between mb-4">
+        <div>
+          <h2 className="text-xl font-bold">{road.name}</h2>
+          <p className="text-sm text-text-muted">{road.area}</p>
         </div>
-        <button onClick={onClose} className="p-2.5 rounded-full bg-slate-100/50 hover:bg-slate-200/50 text-text-muted transition-colors backdrop-blur-sm">
-          <X size={20} />
+
+        <button
+          onClick={onClose}
+          className="p-2 rounded-full bg-slate-100 hover:bg-slate-200"
+        >
+          <X size={16} />
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-        <div className="bg-bg-base/50 backdrop-blur-md rounded-2xl p-5 border border-border-subtle shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <span className="text-[11px] font-bold text-text-muted uppercase tracking-wider flex items-center gap-1.5"><AlertTriangle size={14}/> Complaint Stats</span>
-            <span className="text-xl font-bold text-text-main">{road.complaints} <span className="text-sm font-semibold text-text-muted">reports</span></span>
+      <div className="space-y-4">
+        <div
+          className="px-3 py-2 rounded-xl border text-sm font-semibold"
+          style={{
+            background: cfg.bgColor,
+            color: cfg.hex,
+            borderColor: `${cfg.hex}30`,
+          }}
+        >
+          {cfg.label} ({road.complaints} complaints)
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <p className="text-xs text-text-muted">Authority</p>
+            <p className="font-semibold">{road.authority || 'N/A'}</p>
           </div>
-          <div className="w-full h-2 rounded-full bg-slate-200 overflow-hidden">
-            <motion.div 
-              initial={{ width: 0 }} 
-              animate={{ width: `${Math.min((road.complaints / 100) * 100, 100)}%` }}
-              className="h-full rounded-full" 
-              style={{ background: cfg.hex }} 
-            />
+
+          <div>
+            <p className="text-xs text-text-muted">Category</p>
+            <p className="font-semibold">{road.category || 'N/A'}</p>
+          </div>
+
+          <div>
+            <p className="text-xs text-text-muted">Last Repair</p>
+            <p className="font-semibold">{road.lastRepair || 'N/A'}</p>
+          </div>
+
+          <div>
+            <p className="text-xs text-text-muted">Contractor</p>
+            <p className="font-semibold">{road.contractor || 'N/A'}</p>
           </div>
         </div>
 
-        <div className="bg-bg-base/50 backdrop-blur-md rounded-2xl p-5 border border-border-subtle shadow-sm flex flex-col justify-center">
-           <div className="flex items-center justify-between">
-              <div className="flex flex-col">
-                  <span className="text-[11px] font-bold text-text-muted uppercase tracking-wider flex items-center gap-1.5 mb-1"><CheckCircle size={14}/> Repair Details</span>
-                  <span className="text-sm font-bold text-text-main">Last Inspected</span>
-                  <span className="text-xs font-semibold text-text-muted">{new Date(road.lastInspected).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
-              </div>
-              <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
-                  <Clock size={20} className="text-primary" />
-              </div>
-           </div>
-        </div>
+        <button
+          onClick={onRaiseComplaint}
+          className="w-full mt-2 px-6 py-2 rounded-xl bg-primary text-white font-semibold hover:bg-primary/90"
+        >
+          Raise Complaint
+        </button>
       </div>
-
-      <button
-        onClick={onRaiseComplaint}
-        className="w-full py-4 rounded-2xl text-white font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-primary/20 bg-primary hover:bg-primary/90 transition-all active:scale-[0.98]"
-      >
-        <AlertTriangle size={18} />
-        Raise Complaint
-      </button>
     </motion.div>
   );
 }
 
 export default function MapPage() {
   const navigate = useNavigate();
-  const { selectedRoad, setSelectedRoad, clearSelectedRoad } = useAppStore();
+
+  const {
+    darkMode,
+    selectedRoad,
+    setSelectedRoad,
+    clearSelectedRoad,
+  } = useAppStore();
+
   const mapRef = useRef(null);
 
-  const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
-  const isPlaceholder = !apiKey || apiKey === 'YOUR_GOOGLE_MAPS_API_KEY_HERE';
+  const [authError, setAuthError] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
-  const { isLoaded } = useJsApiLoader({
+  const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+
+  const isPlaceholder =
+    !apiKey || apiKey === 'YOUR_GOOGLE_MAPS_API_KEY_HERE';
+
+  const { isLoaded, loadError } = useJsApiLoader({
+    id: 'google-map-script',
     googleMapsApiKey: isPlaceholder ? '' : apiKey,
   });
 
-  const onMapLoad = useCallback((map) => { mapRef.current = map; }, []);
+  useEffect(() => {
+    window.gm_authFailure = () => {
+      setAuthError(true);
+    };
+
+    return () => {
+      delete window.gm_authFailure;
+    };
+  }, []);
+
+  const onMapLoad = useCallback((map) => {
+    mapRef.current = map;
+  }, []);
 
   const handleRaiseComplaint = () => {
-    navigate('/complaint', { state: { road: selectedRoad } });
+    if (!selectedRoad) return;
+
+    navigate('/complaint', {
+      state: {
+        road: selectedRoad,
+      },
+    });
+
     clearSelectedRoad();
   };
 
-  const PlaceholderView = ({ error }) => (
-    <PageContainer className="flex flex-col items-center justify-center py-12">
-      <div className="text-center max-w-2xl w-full">
-        <div className="w-20 h-20 rounded-2xl flex items-center justify-center mx-auto mb-8 shadow-sm bg-primary/5 border border-primary/10">
-          <Navigation2 size={36} className="text-primary" />
-        </div>
-        
-        <h1 className="text-3xl font-bold text-text-main mb-3 tracking-tight">Interactive Map</h1>
-        <p className="text-text-muted font-medium max-w-lg mx-auto leading-relaxed mb-8">
-          {error 
-            ? "Map failed to load. This usually happens if the Google Maps API quota is exceeded."
-            : "Connect your Google Maps API key to enable live road monitoring and infrastructure analysis."}
-        </p>
+  const suggestions = useMemo(() => {
+    if (!searchQuery.trim()) return [];
 
-        <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/5 border border-primary/10 mb-10 text-[11px] font-semibold text-primary uppercase tracking-wider">
-          <Layers size={14} />
-          {error ? "API Quota Exceeded / Error" : "Setup Required: VITE_GOOGLE_MAPS_API_KEY"}
-        </div>
+    const q = searchQuery.toLowerCase();
 
-        <Card className="p-0 overflow-hidden text-left shadow-md" hover={false}>
-          <div className="px-6 py-4 border-b border-border-subtle bg-slate-50/50 backdrop-blur-sm flex items-center justify-between">
-            <SectionHeader title="Infrastructure Inventory" className="mb-0" />
-            <span className="text-[10px] font-semibold text-text-muted uppercase tracking-wider">{mumbaiRoads.length} Segments Identified</span>
-          </div>
-          <div className="max-h-[400px] overflow-y-auto divide-y divide-border-subtle scrollbar-hide">
-            {mumbaiRoads.map((road) => {
-              const cfg = conditionConfig[road.condition];
-              return (
-                <div key={road.id} className="group flex items-center justify-between py-4 px-6 hover:bg-slate-50 transition-all cursor-default">
-                  <div className="flex-1 min-w-0 pr-4">
-                    <p className="text-sm font-bold text-text-main group-hover:text-primary transition-colors truncate">{road.name}</p>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <MapPin size={10} className="text-text-muted opacity-60" />
-                      <p className="text-[10px] font-medium text-text-muted truncate">{road.from} → {road.to}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <div className="px-3 py-1 rounded-full text-[10px] font-bold border transition-transform group-hover:scale-105"
-                      style={{ background: `${cfg.hex}10`, color: cfg.hex, borderColor: `${cfg.hex}20` }}>
-                      Score {road.score}
-                    </div>
-                    <ChevronRight size={16} className="text-slate-300 group-hover:text-primary transition-all" />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </Card>
-      </div>
-    </PageContainer>
+    return roads
+      .filter(
+        (road) =>
+          road.name.toLowerCase().includes(q) ||
+          (road.area &&
+            road.area.toLowerCase().includes(q))
+      )
+      .slice(0, 8);
+  }, [searchQuery]);
+
+  const handleRoadSelect = useCallback(
+    (road) => {
+      setSelectedRoad(road);
+
+      setSearchQuery('');
+      setShowSuggestions(false);
+
+      if (mapRef.current && road.path?.length) {
+        const midpoint =
+          road.path[Math.floor(road.path.length / 2)];
+
+        mapRef.current.panTo(midpoint);
+        mapRef.current.setZoom(15);
+      }
+    },
+    [setSelectedRoad]
   );
 
-  if (isPlaceholder) {
-    return <PlaceholderView />;
+  const handleCloseSheet = useCallback(() => {
+    clearSelectedRoad();
+
+    if (mapRef.current) {
+      mapRef.current.panTo(MUMBAI_CENTER);
+      mapRef.current.setZoom(12);
+    }
+  }, [clearSelectedRoad]);
+
+  const showFallback =
+    isPlaceholder || !!loadError || authError;
+
+  if (!isLoaded && !showFallback) {
+    return (
+      <div className="h-[calc(100vh-4rem)] flex items-center justify-center">
+        <p>Loading map...</p>
+      </div>
+    );
   }
 
-  if (!isLoaded) {
+  if (showFallback) {
     return (
-      <div className="h-[calc(100vh-4rem)] flex items-center justify-center bg-bg-base">
-        <div className="flex flex-col items-center gap-4">
-          <div className="w-10 h-10 rounded-full border-2 border-primary/10 border-t-primary animate-spin" />
-          <p className="text-xs font-semibold text-text-muted uppercase tracking-wider">Loading Infrastructure Data...</p>
-        </div>
+      <div className="relative h-[calc(100vh-4rem)] overflow-hidden">
+        <PageContainer className="flex flex-col items-center justify-center py-8">
+          <div className="text-center max-w-2xl w-full">
+            <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 bg-primary/10">
+              <Navigation2 size={30} className="text-primary" />
+            </div>
+
+            <h1 className="text-2xl font-bold mb-3">
+              Infrastructure Map
+            </h1>
+
+            <p className="text-text-muted mb-6">
+              Google Maps unavailable. Browse roads below.
+            </p>
+
+            <Card className="p-0 overflow-hidden">
+              <div className="px-6 py-3 border-b flex items-center justify-between">
+                <SectionHeader
+                  title="Infrastructure Inventory"
+                  className="mb-0"
+                />
+
+                <span className="text-xs text-text-muted">
+                  {roads.length} Roads
+                </span>
+              </div>
+
+              <div className="max-h-[400px] overflow-y-auto divide-y">
+                {roads.map((road) => {
+                  const cfg = getSeverity(road.complaints);
+
+                  return (
+                    <div
+                      key={road.id}
+                      onClick={() => handleRoadSelect(road)}
+                      className="flex items-center justify-between py-4 px-6 hover:bg-slate-50 cursor-pointer"
+                    >
+                      <div>
+                        <p className="font-semibold">
+                          {road.name}
+                        </p>
+
+                        <p className="text-xs text-text-muted">
+                          {road.area}
+                        </p>
+                      </div>
+
+                      <div
+                        className="px-3 py-1 rounded-full text-xs font-bold border"
+                        style={{
+                          background: cfg.bgColor,
+                          color: cfg.hex,
+                          borderColor: `${cfg.hex}30`,
+                        }}
+                      >
+                        {cfg.label}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+          </div>
+        </PageContainer>
+
+        <AnimatePresence>
+          {selectedRoad && (
+            <BottomSheet
+              road={selectedRoad}
+              onClose={handleCloseSheet}
+              onRaiseComplaint={handleRaiseComplaint}
+            />
+          )}
+        </AnimatePresence>
       </div>
     );
   }
 
   return (
-    <div className="relative h-[calc(100vh-4rem)] overflow-hidden bg-bg-base">
-      <ErrorBoundary fallback={<PlaceholderView error={true} />}>
-        <GoogleMap
-          mapContainerStyle={mapContainerStyle}
-          center={mumbaiCenter}
-          zoom={12}
-          options={options}
-          onLoad={onMapLoad}
-          onClick={clearSelectedRoad}
-        >
-          {mumbaiRoads.map((road) => {
-            const cfg = conditionConfig[road.condition];
-            const isSelected = selectedRoad?.id === road.id;
-            return (
-              <React.Fragment key={road.id}>
-                {/* Glow effect */}
-                <Polyline
-                  path={road.path}
-                  options={{
-                    strokeColor: cfg.hex,
-                    strokeOpacity: isSelected ? 0.4 : 0.15,
-                    strokeWeight: isSelected ? 16 : 10,
-                    strokeLineCap: 'round',
-                    strokeLineJoin: 'round',
-                    zIndex: isSelected ? 9 : 0,
-                    clickable: false,
-                  }}
-                />
-                {/* Main line */}
-                <Polyline
-                  path={road.path}
-                  options={{
-                    strokeColor: cfg.hex,
-                    strokeOpacity: isSelected ? 1 : 0.8,
-                    strokeWeight: isSelected ? 6 : 4,
-                    strokeLineCap: 'round',
-                    strokeLineJoin: 'round',
-                    zIndex: isSelected ? 10 : 1,
-                  }}
-                  onClick={() => setSelectedRoad(road)}
-                />
-              </React.Fragment>
-            );
-          })}
+    <div className="relative h-[calc(100vh-4rem)] w-full overflow-hidden">
+      <GoogleMap
+        mapContainerStyle={mapContainerStyle}
+        center={MUMBAI_CENTER}
+        zoom={12}
+        onLoad={onMapLoad}
+        options={{
+          disableDefaultUI: true,
+          styles: mapStyles,
+        }}
+      >
+        {roads.map((road) => {
+          if (!road.path?.length) return null;
 
-          {selectedRoad && (
-            <Marker
-              position={selectedRoad.path[Math.floor(selectedRoad.path.length / 2)]}
-              options={{ icon: { path: google.maps.SymbolPath.CIRCLE, scale: 10, fillColor: 'var(--color-primary)', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3 } }}
-            />
+          const midpoint =
+            road.path[Math.floor(road.path.length / 2)];
+
+          const cfg = getSeverity(road.complaints);
+
+          return (
+            <div
+              key={road.id}
+              lat={midpoint.lat}
+              lng={midpoint.lng}
+            >
+              <button
+                onClick={() => handleRoadSelect(road)}
+                className="hidden"
+              >
+                {cfg.label}
+              </button>
+            </div>
+          );
+        })}
+      </GoogleMap>
+
+      {/* Search */}
+      <div className="absolute top-4 left-4 right-4 z-20">
+        <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
+          <input
+            type="text"
+            placeholder="Search roads..."
+            value={searchQuery}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              setShowSuggestions(true);
+            }}
+            className="w-full px-4 py-3 outline-none"
+          />
+
+          {showSuggestions && suggestions.length > 0 && (
+            <div className="border-t max-h-[250px] overflow-y-auto">
+              {suggestions.map((road) => (
+                <button
+                  key={road.id}
+                  onClick={() => handleRoadSelect(road)}
+                  className="w-full text-left px-4 py-3 hover:bg-slate-100"
+                >
+                  <p className="font-semibold">
+                    {road.name}
+                  </p>
+
+                  <p className="text-xs text-text-muted">
+                    {road.area}
+                  </p>
+                </button>
+              ))}
+            </div>
           )}
-        </GoogleMap>
-      </ErrorBoundary>
-
-      <Legend />
+        </div>
+      </div>
 
       <AnimatePresence>
         {selectedRoad && (
           <BottomSheet
             road={selectedRoad}
-            onClose={clearSelectedRoad}
+            onClose={handleCloseSheet}
             onRaiseComplaint={handleRaiseComplaint}
           />
         )}
